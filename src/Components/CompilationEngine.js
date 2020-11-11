@@ -1,13 +1,18 @@
 import React  from 'react';
 import ConvertToFile from './ConvertToFile';
+import SymbolTable from './SymbolTable';
 
 const CompilationEngine = ({content}) => {
 
     var content_separated = [];
     var compiled_content = [];
     var current_token;
+    var count_identifers = 0;
     var original_content;
     var index;
+    var symbolTable;
+    var className = "";
+    var constructorOrNot = false
     const KeywordConstant = ['true','false','null','this'];
     const unaryOp = ['-','~'];
     const op = ['+','-','*','/','&amp;','|','&lt;','&gt;','='];
@@ -86,41 +91,85 @@ const CompilationEngine = ({content}) => {
         }
     }
 
-    const handleIdentifiers = () => {
+    const handleIdentifiersClassName = () => {
         var index_of_identifier = original_content.indexOf(current_token,index);
         if(each_orignal_content[index_of_identifier].includes("<identifier>")){
             compiled_content.push(each_orignal_content[index_of_identifier]);
             advance();
         }
     }
-    const handleType = () => {
 
-        if(!eat('int') && !eat('char')){
-            eat('boolean');
+    const handleIdentifiersSubroutineName = () => {
+        var index_of_identifier = original_content.indexOf(current_token,index);
+        if(each_orignal_content[index_of_identifier].includes("<identifier>")){
+            compiled_content.push(each_orignal_content[index_of_identifier]);
+            advance();
         }
-        else if(!eat('char') && !eat('boolean') ){
+    }
+
+    const handleIdentifiersVarName = (identifierdetails) => {
+        count_identifers++;
+        var index_of_identifier = original_content.indexOf(current_token,index);
+        if(each_orignal_content[index_of_identifier].includes("<identifier>")){
+            compiled_content.push(
+            `<identifier ${identifierdetails.type} ${identifierdetails.kind} ${identifierdetails.index} ${identifierdetails.defined}>
+            ${current_token}
+             </identifier ${identifierdetails.type} ${identifierdetails.kind} ${identifierdetails.index} ${identifierdetails.defined}>`);
+            advance();
+        }
+    }
+
+    const handleBuiltInTypes = () => {
+        var index_of_identifier = original_content.indexOf(current_token,index);
+        if(each_orignal_content[index_of_identifier].includes("<identifier>")){
+            compiled_content.push(each_orignal_content[index_of_identifier]);
+            advance();
+        }
+
+    }
+    const handleType = () => {
+        var regexInt = /int/
+        var regexBoolean = /boolean/
+        var regexChar = /char/
+
+        if(current_token === className){
+            handleIdentifiersClassName();
+        }
+        else if(regexInt.test(current_token)){
             eat('int');
         }
-        else if(!eat('int') &&   !eat('boolean')){
+        else if(regexBoolean.test(current_token) ){
+            eat('boolean');
+        }
+        else if(regexChar.test(current_token)){
             eat('char');
         }
         else{
-            handleIdentifiers();
+            handleBuiltInTypes()
         }
+
     }
 
     const handlesubroutineCall = () => {
         var index_of_subroutine = original_content.indexOf(current_token);
         if(original_content[index_of_subroutine + 1] === "("){
-            handleIdentifiers();
+            handleIdentifiersSubroutineName();
             eat('(');
             handleExpressionList();
             eat(')');
         }
         else{
-            handleIdentifiers();
+            if(className === current_token){
+               handleIdentifiersClassName();
+            }
+            else if(identifierDetails(current_token,false)){
+                handleIdentifiersVarName(identifierDetails(current_token,false));
+            }
+            else {
+                handleBuiltInTypes();
+            }
             eat('.');
-            handleIdentifiers();
+            handleIdentifiersSubroutineName();
             eat('(');
             handleExpressionList();
             eat(')');
@@ -149,32 +198,68 @@ const CompilationEngine = ({content}) => {
     }
 
     const handlesubroutineBody = () => {
+        let name,kind,type;
         compiled_content.push("<subroutineBody>")
-
+      
         eat('{');
         while(current_token.includes('var')){
             compileVarDec();
         }
         compileStatements();
         eat('}')
+        //symbolTable.returnsObject();
+        if(!(constructorOrNot)){
+
+            symbolTable.define(name,type,kind,"subRoutine")
+        }
+        
         compiled_content.push("</subroutineBody>")
 
 
     }
 
+    const identifierDetails = (name,definedOruser) => {
+        if(symbolTable.TypeOf(name) && symbolTable.KindOf(name)  ){
+            let defined;
+            if(definedOruser){
+                defined = "defined";
+            }
+            else{
+                defined = "used";
+            }
+            return ({ 
+                name : name,
+                type : symbolTable.TypeOf(name),
+                kind : symbolTable.KindOf(name),
+                index : symbolTable.IndexOf(name),
+                defined : defined})
+        }
+        else{
+            return false
+        }
+
+    }
+
     const compileClassVarDec = () => {
+        let name,type,kind;
         compiled_content.push("<classVarDec>")
+        kind = current_token;
+        type = original_content[original_content.indexOf(current_token,index) + 1];
+        name =  original_content[original_content.indexOf(current_token,index) + 2];
+        symbolTable.define(name,type,kind,"class") 
         if(!eat('static')){
-            eat('field');
+            eat('field');        
         }
         else{
             eat('static')
         }
         handleType();
-        handleIdentifiers();    
+        handleIdentifiersVarName(identifierDetails(name,true));   
         while(current_token !== ";" ){   //handles (',' varName)*
+            name =  original_content[original_content.indexOf(current_token,index) + 1];
+            symbolTable.define(name,type,kind,"class") 
             eat(',');
-            handleIdentifiers(); 
+            handleIdentifiersVarName(identifierDetails(name,true)); 
         }
         
         eat(';');
@@ -183,14 +268,26 @@ const CompilationEngine = ({content}) => {
 
 
     const compileParameterList = () => {
+        let name,kind,type;
         compiled_content.push("<parameterList>")
+        kind = "ARG";
+
 
         while(current_token !== ")"){
+            type=current_token;
+            name =  original_content[original_content.indexOf(current_token,index) + 1];
+            symbolTable.define(name,type,kind)
             handleType();
-            handleIdentifiers();
+            handleIdentifiersVarName(identifierDetails(name,true));
             while(current_token.includes(',')){
-                eat(',');
-                handleIdentifiers();
+                type= original_content[original_content.indexOf(current_token,index) + 1];
+                name =  original_content[original_content.indexOf(current_token,index) + 2];
+                symbolTable.define(name,type,kind)
+                eat(',');                
+                handleType();  
+                handleIdentifiersVarName(identifierDetails(name,true));
+                
+
             }
         }
         compiled_content.push("</parameterList>")
@@ -199,32 +296,34 @@ const CompilationEngine = ({content}) => {
 
     const compileSubroutine = () => {
         compiled_content.push("<subroutineDec>")
-
-        if(eat('method')){
-
+        let name,kind,type;
+        if(!eat('function') && !eat('constructor')){
+            constructorOrNot = false;
+            name = "this";
+            type = className;
+            kind = "ARG"
+            symbolTable.define(name,type,kind)
             eat('method');
         }
-        else if( eat('function')){
-
+        else if( !eat('method') && !eat('constructor')){
+            constructorOrNot = false;
             eat('function');
         }
-        else if( eat('constructor')){
-
+        else if( !eat('function') && !eat('method')){
+            constructorOrNot = true;
             eat('constructor');
         }
-        if(eat('void')){  //handles (void || type)
-
+        if(!eat('int') && !eat('char') && !eat('Array') && !eat('boolean')){  //handles (void || type)
             eat('void');
         }
         else {
-
             handleType();
         }
 
-
-       while(current_token !== "("){
-           handleIdentifiers();
-       }
+        while(current_token !== '('){
+            handleIdentifiersSubroutineName();
+        }
+       
         eat('(');
         compileParameterList();
         eat(')');
@@ -236,7 +335,9 @@ const CompilationEngine = ({content}) => {
     const compileClass = () => {
         compiled_content.push("<class>");
         eat('class');
-         handleIdentifiers();
+        symbolTable = new SymbolTable();
+        className = current_token;
+        handleIdentifiersClassName();
         eat('{');
         while(current_token !== 'constructor' && current_token !== 'function' && current_token !== 'method'){
           compileClassVarDec();
@@ -245,19 +346,26 @@ const CompilationEngine = ({content}) => {
             compileSubroutine();
         }
         eat('}');
+      // symbolTable.returnsObject()
         compiled_content.push("</class>");
 
     }
 
     const compileVarDec = () => {
         compiled_content.push("<varDec>")
-
-        eat('var');  //handles var
-        handleType(); //handle type
-        handleIdentifiers();   //handles varName
+        let name,kind,type;
+        kind = "var"
+        type =  original_content[original_content.indexOf(current_token,index) + 1];
+        name =  original_content[original_content.indexOf(current_token,index) + 2];
+        symbolTable.define(name,type,kind)
+        eat('var');  //handles var  
+        handleType(); //handle type 
+        handleIdentifiersVarName(identifierDetails(name,true));   //handles varName
         while(current_token !== ";" ){   //handles (',' varName)*
+            name =  original_content[original_content.indexOf(current_token,index) + 1];
+            symbolTable.define(name,type,kind)
             eat(',');
-            handleIdentifiers(); 
+            handleIdentifiersVarName(identifierDetails(name,true)); 
         }
         eat(';');     //handles ;
         compiled_content.push("</varDec>")
@@ -275,7 +383,7 @@ const CompilationEngine = ({content}) => {
     const compileLet = () => {
         compiled_content.push("<letStatement>");
         eat('let');
-        handleIdentifiers();   //handles varName
+        handleIdentifiersVarName(identifierDetails(current_token,false));   //handles varName
         if(current_token !== "="){  //handles [expression]
             eat('[');
             compileExpression();
@@ -387,8 +495,7 @@ const CompilationEngine = ({content}) => {
         }   
         else if(each_orignal_content[index_of_string].includes("<identifier>")){       // handles varName
             if(each_orignal_content[index_of_string+1].includes('[')){  //handles varName '['expression']'
-           
-                handleIdentifiers();     
+            handleIdentifiersVarName(identifierDetails(current_token,false));     
                 eat('[');
                 compileExpression();
                 eat(']');
@@ -400,7 +507,7 @@ const CompilationEngine = ({content}) => {
             }
 
             else {
-                handleIdentifiers();   
+                handleIdentifiersVarName(identifierDetails(current_token,false));   
                 index_of_string++;  
             }
                
@@ -413,11 +520,11 @@ const CompilationEngine = ({content}) => {
         }
         else if(unaryOp.includes(current_token)){    //handles unaryOp term
 
-            if(eat('-')){
+            if(!eat('~')){
                 eat('-');
               
             }
-            else if(eat('~')){
+            else if(!eat('-')){
                 eat('~');
             }
             compileTerm();
@@ -457,9 +564,6 @@ const CompilationEngine = ({content}) => {
         tempindex++;
 
     })
-
-
-  
 
     return (
         <div>
